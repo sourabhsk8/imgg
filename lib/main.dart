@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
-
-void main() {
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:intl/intl.dart';
+import 'dart:async';
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(); // Firebase setup
   runApp(MyApp());
 }
 
@@ -11,33 +17,82 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Login Demo',
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: LoginScreen(),
+      debugShowCheckedModeBanner: false,
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const LoginScreen(),
+        '/register': (context) => const RegisterScreen(), // for employee registration
+      },
     );
   }
 }
 
+class AuthService {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // Login method
+  Future<String?> login(String email, String password) async {
+    try {
+      UserCredential result = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      final User? user = result.user;
+      if (user == null) return "User not found.";
+
+      if (email == 'founder@gmail.com') {
+        return "founder";
+      }
+
+      final snapshot = await _firestore.collection('users').doc(user.uid).get();
+      final role = snapshot.data()?['role'];
+
+      if (role == 'employee') {
+        return "employee";
+      } else {
+        return "Invalid role.";
+      }
+    } catch (e) {
+      return e.toString();
+    }
+  }
+}
+
 class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
   @override
-  _LoginScreenState createState() => _LoginScreenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController emailController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
+  final TextEditingController _email = TextEditingController();
+  final TextEditingController _password = TextEditingController();
 
-  void _login() {
-    String email = emailController.text.trim();
-    String password = passwordController.text.trim();
+  bool _isLoading = false;
+  final AuthService _authService = AuthService();
 
-    if (email == 'founder@gmail.com' && password == 'founder@1234') {
-      Navigator.push(
+  void _login() async {
+    setState(() => _isLoading = true);
+
+    String? result = await _authService.login(_email.text, _password.text);
+
+    setState(() => _isLoading = false);
+
+    if (result == "founder") {
+      Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => FounderDashboard()),
+        MaterialPageRoute(builder: (_) =>  FounderDashboard()),
+      );
+    } else if (result == "employee") {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) =>  EmployeeDashboard()),
       );
     } else {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (context) => EmployeeDashboardScreen()),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result ?? "Login failed")),
       );
     }
   }
@@ -45,35 +100,24 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Login")),
+      appBar: AppBar(title: const Text("Login")),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            TextField(
-              controller: emailController,
-              decoration: InputDecoration(labelText: "Email"),
-            ),
-            SizedBox(height: 10),
-            TextField(
-              controller: passwordController,
-              decoration: InputDecoration(labelText: "Password"),
-              obscureText: true,
-            ),
-            SizedBox(height: 20),
+            TextField(controller: _email, decoration: const InputDecoration(labelText: "Email")),
+            TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: "Password")),
+            const SizedBox(height: 20),
+            _isLoading
+                ? const CircularProgressIndicator()
+                : ElevatedButton(onPressed: _login, child: const Text("Login")),
+            const SizedBox(height: 10),
             TextButton(
+              child: const Text("Register as Employee"),
               onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => EmployeeRegisterScreen(),
-                  ),
-                );
+                Navigator.pushNamed(context, '/register'); // Use your named route or screen
               },
-              child: Text("New Employee? Register here"),
             ),
-
-            ElevatedButton(onPressed: _login, child: Text("Login")),
           ],
         ),
       ),
@@ -81,355 +125,430 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-class EmployeeRegisterScreen extends StatefulWidget {
+
+class RegisterScreen extends StatefulWidget {
+  const RegisterScreen({super.key});
+
   @override
-  _EmployeeRegisterScreenState createState() => _EmployeeRegisterScreenState();
+  State<RegisterScreen> createState() => _RegisterScreenState();
 }
 
-class _EmployeeRegisterScreenState extends State<EmployeeRegisterScreen> {
+class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _auth = FirebaseAuth.instance;
+  final _firestore = FirebaseFirestore.instance;
 
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _confirmPasswordController =
-      TextEditingController();
-  final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _addressController = TextEditingController();
+  final TextEditingController nameController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
+  final TextEditingController confirmPasswordController = TextEditingController();
+  final TextEditingController phoneController = TextEditingController();
+  final TextEditingController addressController = TextEditingController();
 
-  void _registerEmployee() {
+  bool loading = false;
+
+  void registerEmployee() async {
     if (_formKey.currentState!.validate()) {
-      // Perform registration logic here
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Employee registered successfully!")),
-      );
+      if (passwordController.text != confirmPasswordController.text) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Passwords do not match')),
+        );
+        return;
+      }
+
+      try {
+        setState(() => loading = true);
+
+        UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
+          email: emailController.text.trim(),
+          password: passwordController.text.trim(),
+        );
+
+        await _firestore.collection('users').doc(userCredential.user!.uid).set({
+          'uid': userCredential.user!.uid,
+          'name': nameController.text.trim(),
+          'email': emailController.text.trim(),
+          'phone': phoneController.text.trim(),
+          'address': addressController.text.trim(),
+          'role': 'employee',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Registration successful')),
+        );
+
+        Navigator.pop(context); // Go back to login screen
+      } on FirebaseAuthException catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message ?? 'Registration failed')),
+        );
+      } finally {
+        setState(() => loading = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Employee Registration")),
+      appBar: AppBar(title: const Text('Register Employee')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
           key: _formKey,
           child: ListView(
             children: [
-              _buildTextField(_nameController, "Full Name"),
-              _buildTextField(
-                _emailController,
-                "Email",
-                keyboardType: TextInputType.emailAddress,
+              TextFormField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Name'),
+                validator: (value) => value!.isEmpty ? 'Enter name' : null,
               ),
-              _buildTextField(
-                _phoneController,
-                "Phone Number",
-                keyboardType: TextInputType.phone,
+              TextFormField(
+                controller: emailController,
+                decoration: const InputDecoration(labelText: 'Email'),
+                validator: (value) => value!.isEmpty ? 'Enter email' : null,
               ),
-              _buildTextField(_addressController, "Address", maxLines: 2),
-              _buildTextField(
-                _passwordController,
-                "Password",
-                isPassword: true,
+              TextFormField(
+                controller: passwordController,
+                decoration: const InputDecoration(labelText: 'Password'),
+                obscureText: true,
+                validator: (value) => value!.length < 6 ? 'Min 6 characters' : null,
               ),
-              _buildTextField(
-                _confirmPasswordController,
-                "Confirm Password",
-                isPassword: true,
+              TextFormField(
+                controller: confirmPasswordController,
+                decoration: const InputDecoration(labelText: 'Confirm Password'),
+                obscureText: true,
               ),
-              SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _registerEmployee,
-                child: Text("Register"),
+              TextFormField(
+                controller: phoneController,
+                decoration: const InputDecoration(labelText: 'Phone Number'),
               ),
+              TextFormField(
+                controller: addressController,
+                decoration: const InputDecoration(labelText: 'Address'),
+              ),
+              const SizedBox(height: 20),
+              loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : ElevatedButton(
+                      onPressed: registerEmployee,
+                      child: const Text('Register'),
+                    ),
             ],
           ),
         ),
       ),
     );
   }
-
-  Widget _buildTextField(
-    TextEditingController controller,
-    String label, {
-    TextInputType keyboardType = TextInputType.text,
-    bool isPassword = false,
-    int maxLines = 1,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: TextFormField(
-        controller: controller,
-        keyboardType: keyboardType,
-        obscureText: isPassword,
-        maxLines: maxLines,
-        decoration: InputDecoration(
-          labelText: label,
-          border: OutlineInputBorder(),
-        ),
-        validator: (value) {
-          if (value == null || value.trim().isEmpty) {
-            return "$label is required";
-          }
-          if (label == "Confirm Password" &&
-              value != _passwordController.text) {
-            return "Passwords do not match";
-          }
-          return null;
-        },
-      ),
-    );
-  }
 }
 
+
+
 class FounderDashboard extends StatefulWidget {
+  const FounderDashboard({super.key});
+
   @override
-  _FounderDashboardState createState() => _FounderDashboardState();
+  State<FounderDashboard> createState() => _FounderDashboardState();
 }
 
 class _FounderDashboardState extends State<FounderDashboard> {
-  DateTime _focusedDay = DateTime.now();
   DateTime _selectedDay = DateTime.now();
+  List<Map<String, dynamic>> employeeData = [];
+  bool loading = false;
 
-  // Static employee data for demo
-  final List<Map<String, String>> employeeList = [
-    {'name': 'Alice', 'in': '09:00 AM', 'out': '05:00 PM'},
-    {'name': 'Bob', 'in': '00', 'out': '00'},
-    {'name': 'Charlie', 'in': '10:00 AM', 'out': '06:30 PM'},
-    {'name': 'Daisy', 'in': '00', 'out': '00'},
-    {'name': 'Eva', 'in': '08:45 AM', 'out': '04:45 PM'},
-  ];
+  @override
+  void initState() {
+    super.initState();
+    fetchEmployeeAttendance();
+  }
+
+  Future<void> fetchEmployeeAttendance() async {
+    setState(() {
+      loading = true;
+      employeeData.clear();
+    });
+
+    final String selectedDate = DateFormat('yyyy-MM-dd').format(_selectedDay);
+
+    // Get all users with role employee
+    final usersSnapshot = await FirebaseFirestore.instance
+        .collection('users')
+        .where('role', isEqualTo: 'employee')
+        .get();
+
+    for (var doc in usersSnapshot.docs) {
+      String uid = doc['uid'];
+      String name = doc['name'];
+
+      final attendanceDoc = await FirebaseFirestore.instance
+          .collection('attendance')
+          .doc(uid)
+          .collection('dates')
+          .doc(selectedDate)
+          .get();
+
+      String loginTime = '00';
+      String logoutTime = '00';
+
+      if (attendanceDoc.exists) {
+        loginTime = attendanceDoc.data()?['login'] ?? 'NR';
+        logoutTime = attendanceDoc.data()?['logout'] ?? 'NR';
+      } else if (_selectedDay.isBefore(DateTime.now())) {
+        loginTime = 'NR';
+        logoutTime = 'NR';
+      }
+
+      employeeData.add({
+        'name': name,
+        'login': loginTime,
+        'logout': logoutTime,
+      });
+    }
+
+    setState(() => loading = false);
+  }
+
+  void _onDaySelected(DateTime day, DateTime focusedDay) {
+    setState(() {
+      _selectedDay = day;
+    });
+    fetchEmployeeAttendance();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Founder Dashboard")),
+      appBar: AppBar(title: const Text('Founder Dashboard')),
       body: Column(
         children: [
-          // Layer 1: Week View Calendar
           TableCalendar(
-            firstDay: DateTime.utc(2020, 1, 1),
-            lastDay: DateTime.utc(2030, 12, 31),
-            focusedDay: _focusedDay,
+            firstDay: DateTime.now().subtract(const Duration(days: 30)),
+            lastDay: DateTime.now().add(const Duration(days: 30)),
+            focusedDay: _selectedDay,
             currentDay: _selectedDay,
-            calendarFormat: CalendarFormat.week,
-            daysOfWeekVisible: true,
-            headerVisible: false,
-            calendarStyle: CalendarStyle(
+            onDaySelected: _onDaySelected,
+            calendarStyle: const CalendarStyle(
               todayDecoration: BoxDecoration(
-                color: Colors.orange,
-                shape: BoxShape.circle,
-              ),
-              selectedDecoration: BoxDecoration(
-                color: Colors.blue,
+                color: Colors.blueAccent,
                 shape: BoxShape.circle,
               ),
             ),
-            onDaySelected: (selectedDay, focusedDay) {
-              setState(() {
-                _selectedDay = selectedDay;
-                _focusedDay = focusedDay;
-              });
-            },
-            selectedDayPredicate: (day) {
-              return isSameDay(_selectedDay, day);
-            },
+            availableGestures: AvailableGestures.horizontalSwipe,
+            headerVisible: false,
+            calendarFormat: CalendarFormat.week,
           ),
-
-          SizedBox(height: 20),
-
-          // Layer 2: Heading
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Text(
-              "Employee Attendance",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+          const SizedBox(height: 12),
+          Text(
+            "Attendance on: ${DateFormat('dd MMM yyyy').format(_selectedDay)}",
+            style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-
-          // Layer 3: Table View
-          Expanded(
-            child: SingleChildScrollView(
-              child: Table(
-                border: TableBorder.all(color: Colors.grey),
-                columnWidths: {
-                  0: FlexColumnWidth(2),
-                  1: FlexColumnWidth(2),
-                  2: FlexColumnWidth(2),
-                },
-                children: [
-                  // Table Header
-                  TableRow(
-                    decoration: BoxDecoration(color: Colors.blue[100]),
-                    children: [
-                      _buildCell('Employee', isHeader: true),
-                      _buildCell('Login Time', isHeader: true),
-                      _buildCell('Logout Time', isHeader: true),
-                    ],
-                  ),
-                  // Employee Rows
-                  ...employeeList.map((emp) {
-                    return TableRow(
-                      children: [
-                        _buildCell(emp['name'] ?? ''),
-                        _buildCell(emp['in'] ?? '00'),
-                        _buildCell(emp['out'] ?? '00'),
+          const SizedBox(height: 12),
+          loading
+              ? const CircularProgressIndicator()
+              : Expanded(
+                  child: SingleChildScrollView(
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Employee')),
+                        DataColumn(label: Text('Login')),
+                        DataColumn(label: Text('Logout')),
                       ],
-                    );
-                  }).toList(),
-                ],
-              ),
-            ),
-          ),
+                      rows: employeeData
+                          .map(
+                            (emp) => DataRow(cells: [
+                              DataCell(Text(emp['name'])),
+                              DataCell(Text(emp['login'])),
+                              DataCell(Text(emp['logout'])),
+                            ]),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildCell(String value, {bool isHeader = false}) {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Text(
-        value,
-        style: TextStyle(
-          fontWeight: isHeader ? FontWeight.bold : FontWeight.normal,
-          fontSize: 16,
-        ),
       ),
     );
   }
 }
 
-class EmployeeDashboardScreen extends StatefulWidget {
+
+
+class EmployeeDashboard extends StatefulWidget {
+  const EmployeeDashboard({super.key});
+
   @override
-  State<EmployeeDashboardScreen> createState() => _EmployeeDashboardScreenState();
+  State<EmployeeDashboard> createState() => _EmployeeDashboardState();
 }
 
-class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
-  DateTime _focusedDay = DateTime.now();
+class _EmployeeDashboardState extends State<EmployeeDashboard> {
   DateTime _selectedDay = DateTime.now();
+  String loginTime = '';
+  String logoutTime = '';
+  String description = '';
+  bool isLoggedIn = false;
+  Timer? _timer;
+  String currentTime = '';
+  final TextEditingController _descController = TextEditingController();
 
-  DateTime? _loginTime;
-  DateTime? _logoutTime;
-  bool _isLoggedIn = false;
-  bool _hasLoggedOut = false;
+  final uid = FirebaseAuth.instance.currentUser!.uid;
 
-  final TextEditingController _workDoneController = TextEditingController();
+  @override
+  void initState() {
+    super.initState();
+    _updateCurrentTime();
+    _loadDayData();
+  }
 
-  void _handleLogin() {
-    setState(() {
-      _loginTime = DateTime.now();
-      _isLoggedIn = true;
+  void _updateCurrentTime() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      final now = DateTime.now();
+      setState(() {
+        currentTime = DateFormat('hh:mm:ss a').format(now);
+      });
     });
-    // Simulate DB call: save login time
-    print("Login Time saved to DB: $_loginTime");
   }
 
-  void _handleLogout() {
+  Future<void> _loadDayData() async {
+    final docId = DateFormat('yyyy-MM-dd').format(_selectedDay);
+    final doc = await FirebaseFirestore.instance
+        .collection('attendance')
+        .doc(uid)
+        .collection('dates')
+        .doc(docId)
+        .get();
+
     setState(() {
-      _logoutTime = DateTime.now();
-      _hasLoggedOut = true;
+      if (doc.exists) {
+        loginTime = doc['login'] ?? '00';
+        logoutTime = doc['logout'] ?? '00';
+        description = doc['description'] ?? '';
+        _descController.text = description;
+        isLoggedIn = doc['login'] != null && doc['logout'] == null;
+      } else {
+        loginTime = '00';
+        logoutTime = '00';
+        description = '';
+        isLoggedIn = false;
+        _descController.clear();
+      }
     });
-    // Simulate DB call: save logout time + description
-    print("Logout Time saved to DB: $_logoutTime");
-    print("Description saved to DB: ${_workDoneController.text}");
   }
 
-  String _formatTime(DateTime? time) {
-    if (time == null) return "--:--";
-    return "${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}";
+  Future<void> _handleLogin() async {
+    final docId = DateFormat('yyyy-MM-dd').format(_selectedDay);
+    final now = DateFormat('hh:mm:ss a').format(DateTime.now());
+
+    await FirebaseFirestore.instance
+        .collection('attendance')
+        .doc(uid)
+        .collection('dates')
+        .doc(docId)
+        .set({'login': now}, SetOptions(merge: true));
+
+    setState(() {
+      loginTime = now;
+      isLoggedIn = true;
+    });
   }
 
-  Widget _buildConditionalLayer() {
-    if (!_isLoggedIn) {
-      // First login state
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("Current time: ${_formatTime(DateTime.now())}", style: TextStyle(fontSize: 16)),
-          SizedBox(height: 8),
-          ElevatedButton(
-            onPressed: _handleLogin,
-            child: Text("Log In"),
-          ),
-        ],
-      );
-    } else if (_isLoggedIn && !_hasLoggedOut) {
-      // Logged in, show work input + logout
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("You're logged in at: ${_formatTime(_loginTime)}", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          SizedBox(height: 12),
-          TextField(
-            controller: _workDoneController,
-            maxLines: 5,
-            decoration: InputDecoration(
-              hintText: "• Task 1\n• Task 2\n• Task 3",
-              border: OutlineInputBorder(),
-              labelText: "What did you do today?",
-            ),
-          ),
-          SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text("Current time: ${_formatTime(DateTime.now())}", style: TextStyle(fontSize: 16)),
-              ElevatedButton(
-                onPressed: _handleLogout,
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                child: Text("Log Out"),
-              ),
-            ],
-          )
-        ],
-      );
-    } else {
-      // Logged out state, show summary
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("Today Summary", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          SizedBox(height: 12),
-          Text("Logged in at: ${_formatTime(_loginTime)}", style: TextStyle(fontSize: 16)),
-          Text("Logged out at: ${_formatTime(_logoutTime)}", style: TextStyle(fontSize: 16)),
-        ],
-      );
-    }
+  Future<void> _handleLogout() async {
+    final docId = DateFormat('yyyy-MM-dd').format(_selectedDay);
+    final now = DateFormat('hh:mm:ss a').format(DateTime.now());
+    final desc = _descController.text.trim();
+
+    await FirebaseFirestore.instance
+        .collection('attendance')
+        .doc(uid)
+        .collection('dates')
+        .doc(docId)
+        .set({
+      'logout': now,
+      'description': desc,
+    }, SetOptions(merge: true));
+
+    setState(() {
+      logoutTime = now;
+      isLoggedIn = false;
+    });
+  }
+
+  void _onDaySelected(DateTime day, DateTime focusedDay) {
+    setState(() {
+      _selectedDay = day;
+    });
+    _loadDayData();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _descController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final isToday = DateFormat('yyyy-MM-dd').format(_selectedDay) ==
+        DateFormat('yyyy-MM-dd').format(DateTime.now());
+
     return Scaffold(
-      appBar: AppBar(title: const Text("Employee Dashboard")),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            // Layer 1: Calendar (unchanged)
-            TableCalendar(
-              firstDay: DateTime.utc(2022, 1, 1),
-              lastDay: DateTime.utc(2030, 12, 31),
-              focusedDay: _focusedDay,
-              currentDay: _selectedDay,
-              calendarFormat: CalendarFormat.week,
-              onDaySelected: (selected, focused) {
-                setState(() {
-                  _selectedDay = selected;
-                  _focusedDay = focused;
-                });
-              },
-              selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-              headerVisible: false,
+      appBar: AppBar(title: const Text('Employee Dashboard')),
+      body: Column(
+        children: [
+          TableCalendar(
+            firstDay: DateTime.now().subtract(const Duration(days: 30)),
+            lastDay: DateTime.now().add(const Duration(days: 30)),
+            focusedDay: _selectedDay,
+            currentDay: _selectedDay,
+            onDaySelected: _onDaySelected,
+            headerVisible: false,
+            calendarFormat: CalendarFormat.week,
+            calendarStyle: const CalendarStyle(
+              todayDecoration: BoxDecoration(
+                color: Colors.green,
+                shape: BoxShape.circle,
+              ),
             ),
-
-            const SizedBox(height: 20),
-
-            // Layer 2: Conditional content
-            _buildConditionalLayer(),
+          ),
+          const SizedBox(height: 10),
+          if (isToday && loginTime == '00') ...[
+            Text("Current Time: $currentTime"),
+            ElevatedButton(
+              onPressed: _handleLogin,
+              child: const Text('Login'),
+            ),
+          ] else if (isToday && isLoggedIn) ...[
+            Text("Logged In At: $loginTime"),
+            Text("Current Time: $currentTime"),
+            const SizedBox(height: 10),
+            const Text("What did you do today?", style: TextStyle(fontWeight: FontWeight.bold)),
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: TextField(
+                controller: _descController,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  hintText: 'Write your tasks with bullet points',
+                ),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: _handleLogout,
+              child: const Text('Logout'),
+            ),
+          ] else ...[
+            Text("Login Time: $loginTime"),
+            Text("Logout Time: $logoutTime"),
+            if (description.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text("Description:\n$description"),
+              ),
           ],
-        ),
+        ],
       ),
     );
   }
