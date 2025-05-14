@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "195578128101",
+    "project_id": "imgg-d1877",
+    "storage_bucket": "imgg-d1877.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:195578128101:android:5f9ead5cb7f83983e8960c",
+        "android_client_info": {
+          "package_name": "com.example.imgg"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCPxBNyXZavaU3rWYRtMO8wKRisyQNCub0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
