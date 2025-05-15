@@ -385,11 +385,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   DateTime _selectedDay = DateTime.now();
   String loginTime = '';
   String logoutTime = '';
-  String description = '';
   bool isLoggedIn = false;
   Timer? _timer;
   String currentTime = '';
-  final TextEditingController _descController = TextEditingController();
 
   final uid = FirebaseAuth.instance.currentUser!.uid;
 
@@ -423,15 +421,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
       if (doc.exists) {
         loginTime = doc['login'] ?? '00';
         logoutTime = doc['logout'] ?? '00';
-        description = doc['description'] ?? '';
-        _descController.text = description;
         isLoggedIn = doc['login'] != null && doc['logout'] == null;
       } else {
         loginTime = '00';
         logoutTime = '00';
-        description = '';
         isLoggedIn = false;
-        _descController.clear();
       }
     });
   }
@@ -456,7 +450,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   Future<void> _handleLogout() async {
     final docId = DateFormat('yyyy-MM-dd').format(_selectedDay);
     final now = DateFormat('hh:mm:ss a').format(DateTime.now());
-    final desc = _descController.text.trim();
 
     await FirebaseFirestore.instance
         .collection('attendance')
@@ -465,7 +458,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
         .doc(docId)
         .set({
       'logout': now,
-      'description': desc,
     }, SetOptions(merge: true));
 
     setState(() {
@@ -484,7 +476,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
   @override
   void dispose() {
     _timer?.cancel();
-    _descController.dispose();
     super.dispose();
   }
 
@@ -523,18 +514,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
             Text("Logged In At: $loginTime"),
             Text("Current Time: $currentTime"),
             const SizedBox(height: 10),
-            const Text("What did you do today?", style: TextStyle(fontWeight: FontWeight.bold)),
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: TextField(
-                controller: _descController,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  hintText: 'Write your tasks with bullet points',
-                ),
-              ),
-            ),
             ElevatedButton(
               onPressed: _handleLogout,
               child: const Text('Logout'),
@@ -542,11 +521,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> {
           ] else ...[
             Text("Login Time: $loginTime"),
             Text("Logout Time: $logoutTime"),
-            if (description.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text("Description:\n$description"),
-              ),
           ],
         ],
       ),
